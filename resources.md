@@ -1,8 +1,8 @@
 # Resources
 
 ## The competition
-- [https://www.kaggle.com/competitions/vesuvius-challenge-ink-detection/](Kaggle: Ink Detection competition)
-- [https://scrollprize.org/](Competition website)
+- [Kaggle: Ink Detection competition](https://www.kaggle.com/competitions/vesuvius-challenge-ink-detection/)
+- [Competition website](https://www.kaggle.com/competitions/vesuvius-challenge-ink-detection/)
   - There's a Discord invite on the website
 
 ## On the papyri
