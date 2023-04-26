@@ -10,5 +10,9 @@
   - Around 1:38:00, W. Brent Seales discusses using machine learning for ink detection
 - [EduceLab-Scrolls: Verifiable Recovery of Text from Herculaneum Papyri using X-ray CT](https://arxiv.org/abs/2304.02084)
 
+## 3D image processing networks
+- [3D CNNs in PyTorch](https://github.com/xmuyzz/3D-CNN-PyTorch)
+- [PyTorch3D](https://pytorch3d.org/)
+
 ## Other
 - [Open source prizes so far](https://scrollprize.substack.com/p/first-prizes-awarded-open-source)
