@@ -11,7 +11,7 @@ from typing import Optional
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # renamed from "visualize"
-class MetricsRecorder:
+class MetricsRecorder():
     def __init__(self):
         """
         In here we initialize the values to 0
@@ -23,8 +23,9 @@ class MetricsRecorder:
         """
         Takes outputs, labels and loss as input and updates the instance variables fbeta, accuracy and loss
         """
+        labels = labels.to(DEVICE)
         pred_labels = outputs.detach().sigmoid().gt(0.4).int()
-        accuracy = (pred_labels == labels).sum().float().div(labels.size(0))
+        accuracy = (pred_labels == labels).sum().float().div(labels.size(0)).cpu()
         self.fbeta += fbeta_score(labels.view(-1).cpu().numpy(), pred_labels.view(-1).cpu().numpy(), beta=0.5)
         self.accuracy += accuracy.item()
         self.loss += loss.item()
@@ -42,14 +43,14 @@ class Trainer():
     def __init__(self,
                  model: nn.Module,
                  train_loader: data.DataLoader,
-                 test_loader: Optional[data.DataLoader] = None,
+                 val_loader: Optional[data.DataLoader] = None,
                  optimizer=optim.SGD,
-                 criterion=nn.BCEWithLogitsLoss()
+                 criterion=nn.BCEWithLogitsLoss(),
                  lr: float = 0.03,
                  ):
         self.model = model
         self.train_loader = train_loader
-        self.test_loader = test_loader
+        self.val_loader = val_loader
         self.criterion = criterion
         self.lr = lr
         self.optimizer = optimizer(model.parameters(), lr=self.lr)
@@ -65,6 +66,7 @@ class Trainer():
     def train_eval_loop(self, epochs, validation_epochs):
         # Note, this scheduler should not be used if one plans to call
         # train_eval_loop multiple times.
+            
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             self.optimizer, max_lr=self.lr, total_steps=epochs
         )
@@ -90,11 +92,8 @@ class Trainer():
                 train_metrics.reset()
 
                 self.model.eval()
-                for j, (val_subvolumes, val_inklabels) in enumerate(val_loader):
-                    # Note: this needs to be changed
-                    # Right now if validation_epochs < len(val_loader), the model
-                    # only ever sees the beginning of the validation data.
-                    if j >= VALIDATION_EPOCHS:
+                for j, (val_subvolumes, val_inklabels) in enumerate(self.val_loader):
+                    if j >= validation_epochs:
                         break
                     with torch.inference_mode():
                         val_outputs = self.model(val_subvolumes.to(DEVICE))
@@ -108,7 +107,7 @@ class Trainer():
     def plot_metrics(self):
         plt.subplot(131)
         plt.plot(self.histories['train_loss'], label="training")
-        plt.plot(self.histories['val_loss'], label="training")
+        plt.plot(self.histories['val_loss'], label="validation")
         plt.xlabel('epoch')
         plt.ylabel('loss')
         plt.title("Loss")
@@ -116,7 +115,7 @@ class Trainer():
 
         plt.subplot(132)
         plt.plot(self.histories['train_acc'], label="training")
-        plt.plot(self.histories['val_acc'], label="training")
+        plt.plot(self.histories['val_acc'], label="validation")
         plt.xlabel('epoch')
         plt.ylabel('accuracy')
         plt.title("Accuracy")
@@ -124,8 +123,10 @@ class Trainer():
 
         plt.subplot(133)
         plt.plot(self.histories['train_fbeta'], label="training")
-        plt.plot(self.histories['val_fbeta'], label="training")
+        plt.plot(self.histories['val_fbeta'], label="validation")
         plt.xlabel('epoch')
         plt.ylabel('fbeta')
         plt.title("F-Beta")
         plt.legend()
+        
+        plt.tight_layout()
