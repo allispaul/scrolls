@@ -7,6 +7,7 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from sklearn.metrics import fbeta_score
@@ -31,7 +32,8 @@ def predict_validation_rects(model: nn.Module,
                              buffer: int,
                              validation_rects: List[Tuple[int]],
                              decision_boundary: float = 0.4,
-                             writer: SummaryWriter | None = None):
+                             writer: SummaryWriter | None = None
+                            ) -> matplotlib.figure.Figure:
     """Predict ink labels of given rectangles in the training fragments.
     Display them and add them to TensorBoard.
 
@@ -51,6 +53,9 @@ def predict_validation_rects(model: nn.Module,
       decision_boundary: Threshold for predicting a pixel as containing ink
         (default 0.4).
       writer: Optional SummaryWriter object used to add images to TensorBoard.
+    
+    Returns:
+      A matplotlib figure showing the predictions and the true ink labels.
     """
     
     # clean inputs
