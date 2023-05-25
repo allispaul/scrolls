@@ -1,5 +1,7 @@
 from pathlib import Path
 from typing import Optional, List, Tuple
+from datetime import datetime
+import gc
 
 from PIL import Image
 # disable PIL.DecompressionBombWarning
@@ -14,6 +16,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
+from torch.utils.tensorboard import SummaryWriter
 
 from tqdm.auto import tqdm
 
@@ -51,7 +54,7 @@ def get_train_and_val_dsets(
         shape.
       buffer: Radius of subvolumes in x and y directions. Thus, each item in
         the dataset will be a subvolume of size 2*buffer+1 x 2*buffer+1 x z_dim.
-      validation_rect: Rectangle to hold out from each fragment to form the
+      validation_rects: Rectangle to hold out from each fragment to form the
         validation set. Each rectangle is a tuple in the format:
           (top_left_corner_x, top_left_corner_y, width, height)
         Use show_labels_with_rects() to double-check the rectangles.
@@ -76,6 +79,8 @@ def get_train_and_val_dsets(
           shuffle=True,
           amount_of_data: 0.1)
     """
+    # This may have a memory leak. It seemed to take more memory when I called
+    # it multiple times.
     data_path = Path(data_path)
     train_path = data_path / "train"
     
@@ -92,8 +97,10 @@ def get_train_and_val_dsets(
         images = [
             np.array(Image.open(filename), dtype=np.float32)/65535.0
             for filename
-            in tqdm(sorted((prefix / "surface_volume").glob("*.tif"))[
-                z_start[i] : z_start[i] + z_dim])
+            in tqdm(
+                sorted((prefix / "surface_volume").glob("*.tif"))[z_start[i]:z_start[i]+z_dim],
+                desc=f"Loading fragment {fragment}"
+            )
         ]
         
         # turn images to tensors
@@ -158,6 +165,79 @@ def get_train_and_val_dsets(
             data.Subset(val_dset, torch.randperm(val_length)[:desired_val_length]))
             
             
+def get_rect_dset(
+    fragment: int,
+    data_path: Path | str,
+    z_start: int,
+    z_dim: int,
+    buffer: int,
+    rect: Tuple[int],
+) -> data.Dataset:
+    """Get a dataset consisting of a rectangle from a single fragment.
+    
+    This returns one unshuffled dataset, which should only be used for
+    validation or visualization.
+    
+    Args:
+      fragment: Fragment to get rectangle from. Should be in {1, 2, 3}.
+      data_path: Path to data folder.
+      z_start: Lowest z-value to use from the fragment. Should be between 0
+        and 64. 
+      z_dim: Number of z-values to use.
+      buffer: Radius of subvolumes in x and y directions. Thus, each item in
+        the dataset will be a subvolume of size 2*buffer+1 x 2*buffer+1 x z_dim.
+      rect: Rectangle to use from the fragment. Should be a tuple of the form:
+          (top_left_corner_x, top_left_corner_y, width, height)
+        Use show_labels_with_rects() to double-check the rectangle.
+    
+    Returns:
+      A dataset consisting of subvolumes from the given fragment inside the
+      given rectangle.
+    """
+    data_path = Path(data_path)
+    train_path = data_path / "train"
+    
+    # Path for ith fragment
+    prefix = train_path / str(fragment)
+        
+    # read images
+    images = [
+        np.array(Image.open(filename), dtype=np.float32)/65535.0
+        for filename
+        in tqdm(
+            sorted((prefix / "surface_volume").glob("*.tif"))[z_start : z_start + z_dim],
+            desc=f"Loading fragment {fragment}"
+        )
+    ]
+        
+    # turn images to tensors
+    image_stack = torch.stack([torch.from_numpy(image) for image in images], 
+                              dim=0)
+
+    # get mask and labels
+    mask = np.array(Image.open(prefix / "mask.png").convert('1'))
+    label = torch.from_numpy(
+        np.array(Image.open(prefix / "inklabels.png"))
+    ).float()
+
+    # Split our dataset into train and val. The pixels inside the rect are the 
+    # val set, and the pixels outside the rect are the train set.
+    # Adapted from https://www.kaggle.com/code/jamesdavey/100x-faster-pixel-coordinate-generator-1s-runtime
+
+    # Create a Boolean array of the same shape as the bitmask, initially all True
+    not_border = np.zeros(mask.shape, dtype=bool)
+    not_border[buffer:mask.shape[0]-buffer, buffer:mask.shape[1]-buffer] = True
+    arr_mask = mask * not_border
+    inside_rect = np.zeros(mask.shape, dtype=bool) * arr_mask
+    # Sets all indexes with inside_rect array to True
+    inside_rect[rect[1]:rect[1]+rect[3]+1, rect[0]:rect[0]+rect[2]+1] = True
+    # Set the pixels within the inside_rect to False
+    pixels_inside_rect = torch.tensor(np.argwhere(inside_rect))
+
+    # define dataset
+    return SubvolumeDataset(image_stack, label, pixels_inside_rect, buffer, z_dim)
+        
+    
 def show_labels_with_rects(
     fragments_to_use: List[int],
     data_path: Path | str,
@@ -205,6 +285,24 @@ class SubvolumeDataset(data.Dataset):
         return subvolume, inklabel   
     
     
+def create_writer(model_name: str) -> SummaryWriter:
+    """Create a SummaryWriter instance saving to a specific log_dir.
+    
+    This allows us to save metric histories, predictions, etc., to TensorBoard.
+    log_dir is formatted as logs/YYYY-MM-DD/model_name.
+    
+    Args:
+      model_name: Name of model.
+    
+    Returns:
+      A SummaryWriter object saving to log_dir.
+    """
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d")
+    log_dir = Path("logs") / timestamp / model_name
+    print(f"Created SummaryWriter saving to {log_dir}.")
+    return SummaryWriter(log_dir=log_dir)
+    
 # renamed from "visualize"
 class MetricsRecorder():
     def __init__(self):
@@ -232,10 +330,12 @@ class MetricsRecorder():
         self.accuracy = 0
 
         
+        
 class Trainer():
     """Bundles together a model, a training and optionally a validation dataset,
     an optimizer, and loss/accuracy/fbeta@0.5 metrics. Stores histories of the
-    metrics for visualization or comparison.
+    metrics for visualization or comparison. Optionally writes metric hsitories
+    to TensorBoard.
     """
     def __init__(self,
                  model: nn.Module,
@@ -244,6 +344,7 @@ class Trainer():
                  optimizer=optim.SGD,
                  criterion=nn.BCEWithLogitsLoss(),
                  lr: float = 0.03,
+                 writer: Optional[SummaryWriter] = None,
                  ):
         self.model = model
         self.train_loader = train_loader
@@ -259,8 +360,37 @@ class Trainer():
             'val_acc': [],
             'val_fbeta': []
         }
+        self.writer = writer
 
-    def train_eval_loop(self, epochs, validation_epochs):
+    def train_eval_loop(self, epochs, val_epochs, val_period=500):
+        """Train model for a given number of epochs, performing validation
+        periodically.
+        
+        Train the model on a number of training batches given by epochs. Every
+        val_period training batches, pause training and perform validation on
+        val_epochs batches from the validation set. Each time validation is
+        performed, the model's loss, accuracy, and F0.5 scores are saved to the
+        trainer, and optionally written to TensorBoard.
+        
+        A few things in this loop we may want to change eventually:
+          (1) We assume that epochs is less than the length of train_loader.
+          (2) We reinitialize the val_loader iterator every time we perform
+            validation. This makes sense if we're shuffling val_loader, but
+            for performance reasons we may decide to stop doing this.
+          (3) The use of a learning rate scheduler means that this loop should
+            not be called multiple times for the same model. Thus, if we train
+            for 30000 epochs and decide after seeing the output that we want to
+            train for longer, we would have to train from scratch on a new model.
+            This isn't a huge deal, and could be fixed if we can understand how
+            to chain together learning rate schedulers.
+        
+        Args:
+          epochs: Number of training batches to use.
+          val_epochs: Number of validation batches to use each time validation
+            is performed.
+          val_period: Number of epochs to train for in between each occurrence
+            of validation (default 500).
+        """
         # Note, this scheduler should not be used if one plans to call
         # train_eval_loop multiple times.
             
@@ -268,7 +398,7 @@ class Trainer():
             self.optimizer, max_lr=self.lr, total_steps=epochs
         )
         self.model.train()
-        pbar = tqdm(enumerate(self.train_loader), total=epochs)
+        pbar = tqdm(enumerate(self.train_loader), total=epochs, desc="Training")
         train_metrics = MetricsRecorder()
         val_metrics = MetricsRecorder()
         for i, (subvolumes, inklabels) in pbar:
@@ -282,15 +412,15 @@ class Trainer():
             scheduler.step()
             # Updates the training_loss, training_fbeta and training_accuracy
             train_metrics.update(outputs, inklabels, loss)
-            if (i + 1) % 500 == 0:
-                self.histories['train_loss'].append(train_metrics.loss / 500)
-                self.histories['train_acc'].append(train_metrics.accuracy / 500)
-                self.histories['train_fbeta'].append(train_metrics.fbeta / 500)
+            if (i + 1) % val_period == 0:
+                self.histories['train_loss'].append(train_metrics.loss / val_period)
+                self.histories['train_acc'].append(train_metrics.accuracy / val_period)
+                self.histories['train_fbeta'].append(train_metrics.fbeta / val_period)
                 train_metrics.reset()
 
                 self.model.eval()
                 for j, (val_subvolumes, val_inklabels) in enumerate(self.val_loader):
-                    if j >= validation_epochs:
+                    if j >= val_epochs:
                         break
                     with torch.inference_mode():
                         val_outputs = self.model(val_subvolumes.to(DEVICE))
@@ -300,6 +430,29 @@ class Trainer():
                 self.histories['val_acc'].append(val_metrics.accuracy / j)
                 self.histories['val_fbeta'].append(val_metrics.fbeta / j)
                 val_metrics.reset()
+                
+                # If logging to TensorBoard, add metrics to writer
+                if self.writer is not None:
+                    self.writer.add_scalars(main_tag="Loss",
+                                            tag_scalar_dict={
+                                                "train_loss": self.histories['train_loss'][-1],
+                                                "val_loss": self.histories['val_loss'][-1],
+                                            },
+                                            global_step=i)
+                    self.writer.add_scalars(main_tag="Accuracy",
+                                            tag_scalar_dict={
+                                                "train_acc": self.histories['train_acc'][-1],
+                                                "val_acc": self.histories['val_acc'][-1],
+                                            },
+                                            global_step=i)
+                    self.writer.add_scalars(main_tag="Fbeta@0.5",
+                                            tag_scalar_dict={
+                                                "train_fbeta": self.histories['train_fbeta'][-1],
+                                                "val_fbeta": self.histories['val_fbeta'][-1],
+                                            },
+                                            global_step=i)
+                    # write to disk
+                    self.writer.flush()
 
     def plot_metrics(self):
         plt.subplot(131)
@@ -327,3 +480,95 @@ class Trainer():
         plt.legend()
         
         plt.tight_layout()
+        
+def predict_validation_rects(model, 
+                             fragments_to_use: List[int],
+                             data_path: Path | str,
+                             z_start: int | List[int],
+                             z_dim: int,
+                             buffer: int,
+                             validation_rects: List[Tuple[int]],
+                             decision_boundary: float = 0.4,
+                             writer: SummaryWriter | None = None):
+    """Predict ink labels of given rectangles in the training fragments.
+    Display them and add them to TensorBoard.
+
+    Args:
+      model: Model to use for prediction.
+      fragments_to_use: List of fragments to predict on. All entries should
+        be in {1, 2, 3}.
+      data_path: Path to data folder.
+      z_start: Lowest z-value to use from each fragment. Should be between 0
+        and 64. 
+      z_dim: Number of z-values to use from each fragment.
+      buffer: Radius of subvolumes in x and y directions. Thus, each item in
+        the dataset will be a subvolume of size 2*buffer+1 x 2*buffer+1 x z_dim.
+      validation_rects: Rectangle to predict on in each fragment. Each
+        rectangle is a tuple in the format:
+          (top_left_corner_x, top_left_corner_y, width, height)
+      decision_boundary: Threshold for predicting a pixel as containing ink
+        (default 0.4).
+      writer: Optional SummaryWriter object used to add images to TensorBoard.
+    """
+    
+    # clean inputs
+    data_path = Path(data_path)
+    if isinstance(z_start, int):
+        z_start = [z_start for _ in fragments_to_use]
+    BATCH_SIZE = 32
+
+    # initialize figure
+    fig = plt.figure(figsize=(8, 8), constrained_layout=True)
+    subfigs = fig.subfigures(nrows=2, ncols=1)
+    subfigs[0].suptitle('Predicted')
+    axs_pred = subfigs[0].subplots(nrows=1, ncols=len(fragments_to_use))
+    subfigs[1].suptitle('Actual')
+    axs_actual = subfigs[1].subplots(nrows=1, ncols=3)
+    
+    model.eval()
+
+    for i, (fragment, rect) in enumerate(zip(fragments_to_use, validation_rects)):
+        # define validation dataset
+        val_dset = get_rect_dset(fragment, data_path, z_start[i], z_dim,
+                                 buffer, rect)
+        
+        val_loader = data.DataLoader(val_dset, batch_size=BATCH_SIZE, shuffle=False)
+        
+        # predict on validation dataset
+        outputs = []
+        with torch.no_grad():
+            for subvolumes, _ in tqdm(val_loader,
+                                      desc=f"Predicting on fragment {fragment}"):
+                output = model(subvolumes.to(DEVICE)).view(-1).sigmoid().cpu().numpy()
+                outputs.append(output)
+        image_shape = val_dset.image_stack[0].shape
+
+        # get boolean predictions using decision boundary
+        pred_image = np.zeros(image_shape, dtype=np.uint8)
+        outputs = np.concatenate(outputs)
+        for (y, x), prob in zip(val_dset.pixels[:outputs.shape[0]], outputs):
+            pred_image[y, x] = prob > decision_boundary
+            
+        # clean up
+        del val_dset
+        del val_loader
+        gc.collect()
+
+        # plot predictions
+        axs_pred[i].imshow(pred_image, cmap='gray')
+        axs_pred[i].set_xlim([rect[0], rect[0]+rect[2]])
+        axs_pred[i].set_ylim([rect[1]+rect[3], rect[1]])
+        axs_pred[i].axis('off')
+
+        # plot actual labels
+        label = np.array(Image.open(data_path / "train" / f"{i+1}/inklabels.png"))
+        axs_actual[i].imshow(label, cmap='gray')
+        axs_actual[i].set_xlim([rect[0], rect[0]+rect[2]])
+        axs_actual[i].set_ylim([rect[1]+rect[3], rect[1]])
+        axs_actual[i].axis('off')
+        
+    # log to tensorboard
+    if writer is not None:
+        writer.add_figure('Validation predictions', fig)
+    
+    return fig
