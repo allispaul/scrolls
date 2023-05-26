@@ -65,6 +65,7 @@ class Trainer():
         self.optimizer = optimizer(model.parameters(), lr=self.lr)
         self.scheduler = scheduler
         self.histories = {
+            'epochs': [],
             'train_loss': [],
             'train_acc': [],
             'train_fbeta': [],
@@ -121,6 +122,7 @@ class Trainer():
             # Updates the training_loss, training_fbeta and training_accuracy
             train_metrics.update(outputs, inklabels, loss)
             if (i + 1) % val_period == 0:
+                self.histories['epochs'].append(i+1)
                 self.histories['train_loss'].append(train_metrics.loss / val_period)
                 self.histories['train_acc'].append(train_metrics.accuracy / val_period)
                 self.histories['train_fbeta'].append(train_metrics.fbeta / val_period)
@@ -164,24 +166,24 @@ class Trainer():
 
     def plot_metrics(self):
         plt.subplot(131)
-        plt.plot(self.histories['train_loss'], label="training")
-        plt.plot(self.histories['val_loss'], label="validation")
+        plt.plot(self.histories['epochs'], self.histories['train_loss'], label="training")
+        plt.plot(self.histories['epochs'], self.histories['val_loss'], label="validation")
         plt.xlabel('epoch')
         plt.ylabel('loss')
         plt.title("Loss")
         plt.legend()
 
         plt.subplot(132)
-        plt.plot(self.histories['train_acc'], label="training")
-        plt.plot(self.histories['val_acc'], label="validation")
+        plt.plot(self.histories['epochs'], self.histories['train_acc'], label="training")
+        plt.plot(self.histories['epochs'], self.histories['val_acc'], label="validation")
         plt.xlabel('epoch')
         plt.ylabel('accuracy')
         plt.title("Accuracy")
         plt.legend()
 
         plt.subplot(133)
-        plt.plot(self.histories['train_fbeta'], label="training")
-        plt.plot(self.histories['val_fbeta'], label="validation")
+        plt.plot(self.histories['epochs'], self.histories['train_fbeta'], label="training")
+        plt.plot(self.histories['epochs'], self.histories['val_fbeta'], label="validation")
         plt.xlabel('epoch')
         plt.ylabel('fbeta')
         plt.title("F-Beta")
