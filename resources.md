@@ -13,6 +13,9 @@
 ## 3D image processing networks
 - [3D CNNs in PyTorch](https://github.com/xmuyzz/3D-CNN-PyTorch)
 - [PyTorch3D](https://pytorch3d.org/)
+- [3D CNNs on Papers With Code](https://paperswithcode.com/method/3d-convolution)
+- [ink-id](https://github.com/educelab/ink-id/)
+  - This was made by the researchers who started working on the problem. The competition website says it was the state of the art as of 2019.
 
 ## Other
 - [Open source prizes so far](https://scrollprize.substack.com/p/first-prizes-awarded-open-source)
