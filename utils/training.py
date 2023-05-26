@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Callable
 import gc
 
 from PIL import Image
@@ -33,18 +33,37 @@ class Trainer():
     def __init__(self,
                  model: nn.Module,
                  train_loader: data.DataLoader,
-                 val_loader: Optional[data.DataLoader] = None,
-                 optimizer=optim.SGD,
-                 criterion=nn.BCEWithLogitsLoss(),
+                 val_loader: data.DataLoader,
+                 *,
+                 optimizer: type[torch.optim.Optimizer] = optim.SGD,
+                 criterion: nn.Module = nn.BCEWithLogitsLoss(),
                  lr: float = 0.03,
+                 scheduler: Optional[type[torch.optim.lr_scheduler]] = None,
                  writer: Optional[SummaryWriter] = None,
                  ):
+        """Create a Trainer.
+        
+        Args:
+          model: Model to train.
+          train_loader: DataLoader containing training data.
+          val_loader: DataLoader containing validation data.
+          optimizer: Optimizer to use during training; give it a class, not an
+            instance (SGD, not SGD()). Default torch.optim.SGD.
+          criterion: Loss criterion to minimize. Default nn.BCEWithLogitsLoss().
+          lr: Learning rate. Default 0.03.
+          scheduler: Optional learning rate scheduler. As with optimizer, give
+            a class, which will be initialized at the start of training. If no
+            scheduler is given, a constant learning rate is used.
+          writer: SummaryWriter object to log performance to TensorBoard. You
+            can create this using .logging.create_writer().
+        """
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.criterion = criterion
         self.lr = lr
         self.optimizer = optimizer(model.parameters(), lr=self.lr)
+        self.scheduler = scheduler
         self.histories = {
             'train_loss': [],
             'train_acc': [],
@@ -70,12 +89,6 @@ class Trainer():
           (2) We reinitialize the val_loader iterator every time we perform
             validation. This makes sense if we're shuffling val_loader, but
             for performance reasons we may decide to stop doing this.
-          (3) The use of a learning rate scheduler means that this loop should
-            not be called multiple times for the same model. Thus, if we train
-            for 30000 epochs and decide after seeing the output that we want to
-            train for longer, we would have to train from scratch on a new model.
-            This isn't a huge deal, and could be fixed if we can understand how
-            to chain together learning rate schedulers.
         
         Args:
           epochs: Number of training batches to use.
@@ -87,9 +100,10 @@ class Trainer():
         # Note, this scheduler should not be used if one plans to call
         # train_eval_loop multiple times.
             
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            self.optimizer, max_lr=self.lr, total_steps=epochs
-        )
+        if self.scheduler is not None:
+            scheduler = self.scheduler(
+                self.optimizer, max_lr=self.lr, total_steps=epochs
+            )
         self.model.train()
         pbar = tqdm(enumerate(self.train_loader), total=epochs, desc="Training")
         train_metrics = MetricsRecorder()
@@ -102,7 +116,8 @@ class Trainer():
             loss = self.criterion(outputs, inklabels.to(DEVICE))
             loss.backward()
             self.optimizer.step()
-            scheduler.step()
+            if self.scheduler is not None:
+                scheduler.step()
             # Updates the training_loss, training_fbeta and training_accuracy
             train_metrics.update(outputs, inklabels, loss)
             if (i + 1) % val_period == 0:
