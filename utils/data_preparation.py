@@ -19,20 +19,45 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class SubvolumeDataset(data.Dataset):
-    def __init__(self, image_stack, label, pixels, buffer, z_dim):
+    """Dataset containing cubical subvolumes of image stack."""
+    def __init__(self, image_stack: torch.Tensor, label: torch.Tensor | None,
+                 pixels: torch.Tensor, buffer: int):
+        """Create a new SubvolumeDataset.
+        
+        Args:
+          image_stack: 3D image data, as a tensor of voxel values of shape
+            (z_dim, y_dim, x_dim).
+          label: ink labels for the image stack. A tensor of shape (y_dim, x_dim).
+            For testing data, instead pass label=None.
+          pixels: Tensor listing pixels to use as centers of subvolumes, of
+            shape (num_pixels, 2). Each row of pixels gives coordinates (y, x) of
+            a single subvolume center.
+          buffer: radius of each subvolume in the x and y direction. Thus, each
+            subvolume has shape (z_dim, 2*buffer+1, 2*buffer+1).
+        """
         self.image_stack = image_stack
         self.label = label
         self.pixels = pixels
         self.buffer = buffer
-        self.z_dim = z_dim
+        
     def __len__(self):
+        """Get the length of the dataset."""
         return len(self.pixels)
+    
     def __getitem__(self, index):
+        """Get a subvolume from the dataset.
+        
+        If the dataset was defined without label data, the returned label will
+        be -1.
+        """
         y, x = self.pixels[index]
         subvolume = self.image_stack[
             :, y-self.buffer:y+self.buffer+1, x-self.buffer:x+self.buffer+1
-        ].view(1, self.z_dim, self.buffer*2+1, self.buffer*2+1)
-        inklabel = self.label[y, x].view(1)
+        ].view(1, -1, self.buffer*2+1, self.buffer*2+1)
+        if self.label is None:
+            inklabel = -1
+        else:
+            inklabel = self.label[y, x].view(1)
         return subvolume, inklabel   
     
     
@@ -146,8 +171,8 @@ def get_train_and_val_dsets(
         pixels_outside_rect = torch.tensor(np.argwhere(outside_rect))
 
         # define datasets
-        train_dset = SubvolumeDataset(image_stack, label, pixels_outside_rect, buffer, z_dim)
-        val_dset = SubvolumeDataset(image_stack, label, pixels_inside_rect, buffer, z_dim)
+        train_dset = SubvolumeDataset(image_stack, label, pixels_outside_rect, buffer)
+        val_dset = SubvolumeDataset(image_stack, label, pixels_inside_rect, buffer)
         train_dsets.append(train_dset)
         val_dsets.append(val_dset)
         
@@ -179,20 +204,22 @@ def get_train_and_val_dsets(
             
             
 def get_rect_dset(
-    fragment: int,
+    fragment: int | str,
     data_path: Path | str,
     z_start: int,
     z_dim: int,
     buffer: int,
-    rect: Tuple[int],
+    rect: Tuple[int] | None = None,
 ) -> data.Dataset:
     """Get a dataset consisting of a rectangle from a single fragment.
     
     This returns one unshuffled dataset, which should only be used for
-    validation or visualization.
+    validation, visualization, or testing.
     
     Args:
-      fragment: Fragment to get rectangle from. Should be in {1, 2, 3}.
+      fragment: Fragment to get rectangle from. Should be one of 1, 2, 3, 'a',
+        'b', where 1, 2, 3 are training fragments and 'a', 'b' are testing
+        fragments.
       data_path: Path to data folder.
       z_start: Lowest z-value to use from the fragment. Should be between 0
         and 64. 
@@ -201,17 +228,24 @@ def get_rect_dset(
         the dataset will be a subvolume of size 2*buffer+1 x 2*buffer+1 x z_dim.
       rect: Rectangle to use from the fragment. Should be a tuple of the form:
           (top_left_corner_x, top_left_corner_y, width, height)
-        Use show_labels_with_rects() to double-check the rectangle.
+        Use show_labels_with_rects() to double-check the rectangle. If rect is
+        None, the whole dataset will be used.
     
     Returns:
       A dataset consisting of subvolumes from the given fragment inside the
       given rectangle.
     """
+    # clean input
     data_path = Path(data_path)
-    train_path = data_path / "train"
+    fragment = str(fragment)
     
-    # Path for ith fragment
-    prefix = train_path / str(fragment)
+    # check if training or testing
+    if fragment in {'1', '2', '3'}:
+        prefix = data_path / "train" / fragment
+    elif fragment in {'a', 'b'}:
+        prefix = data_path / "test" / fragment
+    else:
+        raise ValueError(f"Unrecognized fragment {fragment}.")
         
     # read images
     images = [
@@ -229,26 +263,28 @@ def get_rect_dset(
 
     # get mask and labels
     mask = np.array(Image.open(prefix / "mask.png").convert('1'))
-    label = torch.from_numpy(
-        np.array(Image.open(prefix / "inklabels.png"))
-    ).float()
-
-    # Split our dataset into train and val. The pixels inside the rect are the 
-    # val set, and the pixels outside the rect are the train set.
-    # Adapted from https://www.kaggle.com/code/jamesdavey/100x-faster-pixel-coordinate-generator-1s-runtime
+    if fragment in {'1', '2', '3'}:
+        label = torch.from_numpy(
+            np.array(Image.open(prefix / "inklabels.png"))
+        ).float()
+    else:
+        label = None
 
     # Create a Boolean array of the same shape as the bitmask, initially all True
     not_border = np.zeros(mask.shape, dtype=bool)
     not_border[buffer:mask.shape[0]-buffer, buffer:mask.shape[1]-buffer] = True
     arr_mask = mask * not_border
-    inside_rect = np.zeros(mask.shape, dtype=bool) * arr_mask
-    # Sets all indexes with inside_rect array to True
-    inside_rect[rect[1]:rect[1]+rect[3]+1, rect[0]:rect[0]+rect[2]+1] = True
-    # Set the pixels within the inside_rect to False
-    pixels_inside_rect = torch.tensor(np.argwhere(inside_rect))
+    if rect is not None:
+        inside_rect = np.zeros(mask.shape, dtype=bool) * arr_mask
+        # Sets all indexes with inside_rect array to True
+        inside_rect[rect[1]:rect[1]+rect[3]+1, rect[0]:rect[0]+rect[2]+1] = True
+        # Set the pixels within the inside_rect to False
+        pixels = torch.tensor(np.argwhere(inside_rect))
+    else:
+        pixels = torch.tensor(np.argwhere(arr_mask))
 
     # define dataset
-    return SubvolumeDataset(image_stack, label, pixels_inside_rect, buffer, z_dim)
+    return SubvolumeDataset(image_stack, label, pixels, buffer)
         
     
 def show_labels_with_rects(
