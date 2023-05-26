@@ -40,6 +40,7 @@ class Trainer():
                  lr: float = 0.03,
                  scheduler: Optional[type[torch.optim.lr_scheduler]] = None,
                  writer: Optional[SummaryWriter] = None,
+                 **kwargs,
                  ):
         """Create a Trainer.
         
@@ -56,13 +57,14 @@ class Trainer():
             scheduler is given, a constant learning rate is used.
           writer: SummaryWriter object to log performance to TensorBoard. You
             can create this using .logging.create_writer().
+          Keyword arguments prefixed by `optimizer_` or `scheduler_` are passed
+            to the optimizer or scheduler, respectively.
         """
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.criterion = criterion
         self.lr = lr
-        self.optimizer = optimizer(model.parameters(), lr=self.lr)
         self.scheduler = scheduler
         self.histories = {
             'epochs': [],
@@ -74,6 +76,16 @@ class Trainer():
             'val_fbeta': []
         }
         self.writer = writer
+        self.optimizer_kwargs = dict()
+        self.scheduler_kwargs = dict()
+        for key in kwargs.keys():
+            # strip off optimizer or scheduler prefix and add to relevant dict
+            if key.startswith('optimizer_'):
+                self.optimizer_kwargs.update({key[10:]: kwargs[key]})
+            if key.startswith('scheduler_'):
+                self.scheduler_kwargs.update({key[10:]: kwargs[key]})
+        self.optimizer = optimizer(model.parameters(), lr=self.lr,
+                                   **self.optimizer_kwargs)
 
     def train_eval_loop(self, epochs, val_epochs, val_period=500):
         """Train model for a given number of epochs, performing validation
@@ -103,7 +115,8 @@ class Trainer():
             
         if self.scheduler is not None:
             scheduler = self.scheduler(
-                self.optimizer, max_lr=self.lr, total_steps=epochs
+                self.optimizer, max_lr=self.lr, total_steps=epochs,
+                **self.scheduler_kwargs
             )
         self.model.train()
         pbar = tqdm(enumerate(self.train_loader), total=epochs, desc="Training")
