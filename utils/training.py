@@ -79,6 +79,7 @@ class Trainer():
         self.writer = writer
         self.optimizer_kwargs = dict()
         self.scheduler_kwargs = dict()
+        self.scheduler_kwargs.setdefault('max_lr', self.lr)
         for key in kwargs.keys():
             # strip off optimizer or scheduler prefix and add to relevant dict
             if key.startswith('optimizer_'):
@@ -116,7 +117,7 @@ class Trainer():
             
         if self.scheduler_class is not None:
             self.scheduler = self.scheduler_class(
-                self.optimizer, max_lr=self.lr, total_steps=epochs,
+                self.optimizer,
                 **self.scheduler_kwargs
             )
         self.model.train()
