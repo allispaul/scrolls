@@ -65,7 +65,7 @@ class Trainer():
         self.val_loader = val_loader
         self.criterion = criterion
         self.lr = lr
-        self.scheduler = scheduler
+        self.scheduler_class = scheduler
         self.histories = {
             'epochs': [],
             'train_loss': [],
@@ -73,7 +73,8 @@ class Trainer():
             'train_fbeta': [],
             'val_loss': [],
             'val_acc': [],
-            'val_fbeta': []
+            'val_fbeta': [],
+            'lr': []
         }
         self.writer = writer
         self.optimizer_kwargs = dict()
@@ -86,7 +87,7 @@ class Trainer():
                 self.scheduler_kwargs.update({key[10:]: kwargs[key]})
         self.optimizer = optimizer(model.parameters(), lr=self.lr,
                                    **self.optimizer_kwargs)
-
+    
     def train_eval_loop(self, epochs, val_epochs, val_period=500):
         """Train model for a given number of epochs, performing validation
         periodically.
@@ -113,8 +114,8 @@ class Trainer():
         # Note, this scheduler should not be used if one plans to call
         # train_eval_loop multiple times.
             
-        if self.scheduler is not None:
-            scheduler = self.scheduler(
+        if self.scheduler_class is not None:
+            self.scheduler = self.scheduler_class(
                 self.optimizer, max_lr=self.lr, total_steps=epochs,
                 **self.scheduler_kwargs
             )
@@ -130,17 +131,27 @@ class Trainer():
             loss = self.criterion(outputs, inklabels.to(DEVICE))
             loss.backward()
             self.optimizer.step()
-            if self.scheduler is not None:
-                scheduler.step()
+            if self.scheduler_class is not None:
+                self.scheduler.step()
             # Updates the training_loss, training_fbeta and training_accuracy
             train_metrics.update(outputs, inklabels, loss)
             if (i + 1) % val_period == 0:
+                # record number of epochs and training metrics
                 self.histories['epochs'].append(i+1)
                 self.histories['train_loss'].append(train_metrics.loss / val_period)
                 self.histories['train_acc'].append(train_metrics.accuracy / val_period)
                 self.histories['train_fbeta'].append(train_metrics.fbeta / val_period)
                 train_metrics.reset()
+                
+                # record learning rate
+                if self.scheduler_class is not None:
+                    self.histories['lr'].append(self.scheduler.get_last_lr()[0])
+                else:
+                    self.histories['lr'].append(self.optimizer
+                                                .state_dict()
+                                                .param_groups()['lr'])
 
+                # predict on validation data and record metrics
                 self.model.eval()
                 for j, (val_subvolumes, val_inklabels) in enumerate(self.val_loader):
                     if j >= val_epochs:
@@ -156,24 +167,30 @@ class Trainer():
                 
                 # If logging to TensorBoard, add metrics to writer
                 if self.writer is not None:
-                    self.writer.add_scalars(main_tag="Loss",
-                                            tag_scalar_dict={
-                                                "train_loss": self.histories['train_loss'][-1],
-                                                "val_loss": self.histories['val_loss'][-1],
-                                            },
-                                            global_step=i)
-                    self.writer.add_scalars(main_tag="Accuracy",
-                                            tag_scalar_dict={
-                                                "train_acc": self.histories['train_acc'][-1],
-                                                "val_acc": self.histories['val_acc'][-1],
-                                            },
-                                            global_step=i)
-                    self.writer.add_scalars(main_tag="Fbeta@0.5",
-                                            tag_scalar_dict={
-                                                "train_fbeta": self.histories['train_fbeta'][-1],
-                                                "val_fbeta": self.histories['val_fbeta'][-1],
-                                            },
-                                            global_step=i)
+                    self.writer.add_scalars(
+                        main_tag="Loss",
+                        tag_scalar_dict={
+                            "train_loss": self.histories['train_loss'][-1], 
+                            "val_loss": self.histories['val_loss'][-1], 
+                        }, 
+                        global_step=i)
+                    self.writer.add_scalars(
+                        main_tag="Accuracy",  
+                        tag_scalar_dict={  
+                            "train_acc": self.histories['train_acc'][-1], 
+                            "val_acc": self.histories['val_acc'][-1], 
+                        }, 
+                        global_step=i)
+                    self.writer.add_scalars(
+                        main_tag="Fbeta@0.5", 
+                        tag_scalar_dict={ 
+                            "train_fbeta": self.histories['train_fbeta'][-1], 
+                            "val_fbeta": self.histories['val_fbeta'][-1], 
+                        }, 
+                        global_step=i)
+                    self.writer.add_scalar("Learning rate",
+                                           self.histories['lr'][-1], 
+                                           global_step=i)
                     # write to disk
                     self.writer.flush()
 
