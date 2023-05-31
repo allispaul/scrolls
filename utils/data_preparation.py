@@ -204,8 +204,7 @@ def get_train_and_val_dsets(
             
             
 def get_rect_dset(
-    fragment: int | str,
-    data_path: Path | str,
+    fragment_path: Path | str,
     z_start: int,
     z_dim: int,
     buffer: int,
@@ -217,10 +216,7 @@ def get_rect_dset(
     validation, visualization, or testing.
     
     Args:
-      fragment: Fragment to get rectangle from. Should be one of 1, 2, 3, 'a',
-        'b', where 1, 2, 3 are training fragments and 'a', 'b' are testing
-        fragments.
-      data_path: Path to data folder.
+      fragment_path: Path to folder containing fragment data (e.g., 'data/train/1')
       z_start: Lowest z-value to use from the fragment. Should be between 0
         and 64. 
       z_dim: Number of z-values to use.
@@ -236,23 +232,15 @@ def get_rect_dset(
       given rectangle.
     """
     # clean input
-    data_path = Path(data_path)
-    fragment = str(fragment)
+    fragment_path = Path(fragment_path)
     
-    # check if training or testing
-    if fragment in {'1', '2', '3'}:
-        prefix = data_path / "train" / fragment
-    elif fragment in {'a', 'b'}:
-        prefix = data_path / "test" / fragment
-    else:
-        raise ValueError(f"Unrecognized fragment {fragment}.")
         
     # read images
     images = [
         np.array(Image.open(filename), dtype=np.float32)/65535.0
         for filename
         in tqdm(
-            sorted((prefix / "surface_volume").glob("*.tif"))[z_start : z_start + z_dim],
+            sorted((fragment_path / "surface_volume").glob("*.tif"))[z_start : z_start + z_dim],
             desc=f"Loading fragment {fragment}"
         )
     ]
@@ -262,10 +250,10 @@ def get_rect_dset(
                               dim=0)
 
     # get mask and labels
-    mask = np.array(Image.open(prefix / "mask.png").convert('1'))
+    mask = np.array(Image.open(fragment_path / "mask.png").convert('1'))
     if fragment in {'1', '2', '3'}:
         label = torch.from_numpy(
-            np.array(Image.open(prefix / "inklabels.png"))
+            np.array(Image.open(fragment_path / "inklabels.png"))
         ).float()
     else:
         label = None
