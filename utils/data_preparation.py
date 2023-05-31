@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional, List, Tuple
 import gc
+import os
 
 from PIL import Image
 # disable PIL.DecompressionBombWarning
@@ -241,7 +242,7 @@ def get_rect_dset(
         for filename
         in tqdm(
             sorted((fragment_path / "surface_volume").glob("*.tif"))[z_start : z_start + z_dim],
-            desc=f"Loading fragment {fragment}"
+            desc=f"Loading fragment from {fragment_path}"
         )
     ]
         
@@ -251,7 +252,7 @@ def get_rect_dset(
 
     # get mask and labels
     mask = np.array(Image.open(fragment_path / "mask.png").convert('1'))
-    if fragment in {'1', '2', '3'}:
+    if os.path.exists(fragment_path / "inklabels.png"):
         label = torch.from_numpy(
             np.array(Image.open(fragment_path / "inklabels.png"))
         ).float()
