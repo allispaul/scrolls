@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional, List, Tuple, Callable
+from itertools import cycle
 import gc
 
 from PIL import Image
@@ -121,10 +122,15 @@ class Trainer():
                 **self.scheduler_kwargs
             )
         self.model.train()
-        pbar = tqdm(enumerate(self.train_loader), total=epochs, desc="Training")
+        
         train_metrics = MetricsRecorder()
         val_metrics = MetricsRecorder()
-        for i, (subvolumes, inklabels) in pbar:
+        
+        # estimate total epochs
+        total_epochs = epochs + (epochs // val_period) * val_epochs
+        pbar = tqdm(total=total_epochs, desc="Training")
+        for i, (subvolumes, inklabels) in enumerate(cycle(self.train_loader)):
+            pbar.update()
             if i >= epochs:
                 break
             self.optimizer.zero_grad()
@@ -136,14 +142,14 @@ class Trainer():
                 self.scheduler.step()
             # Updates the training_loss, training_fbeta and training_accuracy
             train_metrics.update(outputs, inklabels, loss)
-            if (i + 1) % val_period == 0:
+            if (i + 1) % val_period == 0 or i+1 == len(self.train_loader):
                 # record number of epochs and training metrics
-                self.histories['epochs'].append(i+1)
+                self.histories['epochs'].append(i)
                 self.histories['train_loss'].append(train_metrics.loss / val_period)
                 self.histories['train_acc'].append(train_metrics.accuracy / val_period)
                 self.histories['train_fbeta'].append(train_metrics.fbeta / val_period)
                 train_metrics.reset()
-                
+
                 # record learning rate
                 if self.scheduler_class is not None:
                     self.histories['lr'].append(self.scheduler.get_last_lr()[0])
@@ -154,7 +160,8 @@ class Trainer():
 
                 # predict on validation data and record metrics
                 self.model.eval()
-                for j, (val_subvolumes, val_inklabels) in enumerate(self.val_loader):
+                for j, (val_subvolumes, val_inklabels) in enumerate(cycle(self.val_loader)):
+                    pbar.update()
                     if j >= val_epochs:
                         break
                     with torch.inference_mode():
@@ -165,7 +172,7 @@ class Trainer():
                 self.histories['val_acc'].append(val_metrics.accuracy / j)
                 self.histories['val_fbeta'].append(val_metrics.fbeta / j)
                 val_metrics.reset()
-                
+
                 # If logging to TensorBoard, add metrics to writer
                 if self.writer is not None:
                     self.writer.add_scalars(
