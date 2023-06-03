@@ -128,7 +128,7 @@ class Trainer():
         
         # It doesn't make sense to have more validation steps than batches in
         # the validation set
-        val_epochs = max(val_epochs, len(val_loader))
+        val_epochs = max(val_epochs, len(self.val_loader))
         # estimate total epochs
         total_epochs = epochs + (epochs // val_period) * val_epochs
         pbar = tqdm(total=total_epochs, desc="Training")
@@ -157,9 +157,7 @@ class Trainer():
                 if self.scheduler_class is not None:
                     self.histories['lr'].append(self.scheduler.get_last_lr()[0])
                 else:
-                    self.histories['lr'].append(self.optimizer
-                                                .state_dict()
-                                                .param_groups()['lr'])
+                    self.histories['lr'].append(self.optimizer.param_groups[0]['lr'])
 
                 # predict on validation data and record metrics
                 self.model.eval()
