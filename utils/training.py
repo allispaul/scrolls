@@ -184,24 +184,25 @@ class Trainer():
                             "train_loss": self.histories['train_loss'][-1], 
                             "val_loss": self.histories['val_loss'][-1], 
                         }, 
-                        global_step=i)
+                        global_step=i+1)
                     self.writer.add_scalars(
                         main_tag="Accuracy",  
                         tag_scalar_dict={  
                             "train_acc": self.histories['train_acc'][-1], 
                             "val_acc": self.histories['val_acc'][-1], 
                         }, 
-                        global_step=i)
+                        global_step=i+1)
                     self.writer.add_scalars(
                         main_tag="Fbeta@0.5", 
                         tag_scalar_dict={ 
                             "train_fbeta": self.histories['train_fbeta'][-1], 
                             "val_fbeta": self.histories['val_fbeta'][-1], 
                         }, 
-                        global_step=i)
-                    self.writer.add_scalar("Learning rate",
-                                           self.histories['lr'][-1], 
-                                           global_step=i)
+                        global_step=i+1)
+                    self.writer.add_scalar(
+                        "Learning rate",
+                        self.histories['lr'][-1], 
+                        global_step=i+1)
                     # write to disk
                     self.writer.flush()
 
