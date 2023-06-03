@@ -126,6 +126,9 @@ class Trainer():
         train_metrics = MetricsRecorder()
         val_metrics = MetricsRecorder()
         
+        # It doesn't make sense to have more validation steps than batches in
+        # the validation set
+        val_epochs = max(val_epochs, len(val_loader))
         # estimate total epochs
         total_epochs = epochs + (epochs // val_period) * val_epochs
         pbar = tqdm(total=total_epochs, desc="Training")
@@ -144,7 +147,7 @@ class Trainer():
             train_metrics.update(outputs, inklabels, loss)
             if (i + 1) % val_period == 0 or i+1 == len(self.train_loader):
                 # record number of epochs and training metrics
-                self.histories['epochs'].append(i)
+                self.histories['epochs'].append(i+1)
                 self.histories['train_loss'].append(train_metrics.loss / val_period)
                 self.histories['train_acc'].append(train_metrics.accuracy / val_period)
                 self.histories['train_fbeta'].append(train_metrics.fbeta / val_period)
@@ -160,7 +163,7 @@ class Trainer():
 
                 # predict on validation data and record metrics
                 self.model.eval()
-                for j, (val_subvolumes, val_inklabels) in enumerate(cycle(self.val_loader)):
+                for j, (val_subvolumes, val_inklabels) in enumerate(self.val_loader):
                     pbar.update()
                     if j >= val_epochs:
                         break
