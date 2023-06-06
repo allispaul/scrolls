@@ -203,6 +203,11 @@ class Trainer():
                         global_step=i+1)
                     # write to disk
                     self.writer.flush()
+                    
+                # If loss is NaN, the model died and we might as well stop training.
+                if np.isnan(self.histories['val_loss'][-1]) or np.isnan(self.histories['train_loss'][-1]):
+                    print (f"Model died at training epoch {i+1}, stopping training.")
+                    break
 
     def plot_metrics(self):
         plt.subplot(131)
