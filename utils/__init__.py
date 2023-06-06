@@ -1,6 +1,7 @@
 from .data_preparation import *
-from .logging import *
+from .models import *
 from .training import *
+from .logging import *
 from .model_evaluation import *
 
 __all__ = ['SubvolumeDataset',
@@ -10,4 +11,5 @@ __all__ = ['SubvolumeDataset',
            'create_writer',
            'MetricsRecorder',
            'Trainer',
-           'predict_validation_rects']
+           'predict_validation_rects',
+           'InkDetector']
