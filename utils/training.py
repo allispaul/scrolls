@@ -128,9 +128,9 @@ class Trainer():
         
         # It doesn't make sense to have more validation steps than batches in
         # the validation set
-        val_epochs = max(val_epochs, len(self.val_loader))
+        val_epochs = min(val_epochs, len(self.val_loader))
         # estimate total epochs
-        total_epochs = epochs + (epochs // val_period) * val_epochs
+        total_epochs = epochs + ((epochs // val_period) * val_epochs)
         pbar = tqdm(total=total_epochs, desc="Training")
         for i, (subvolumes, inklabels) in enumerate(cycle(self.train_loader)):
             pbar.update()
