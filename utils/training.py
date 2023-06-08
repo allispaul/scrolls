@@ -42,7 +42,7 @@ class Trainer():
                  criterion: nn.Module = nn.BCEWithLogitsLoss(),
                  lr: float = 0.03,
                  scheduler: Optional[type[torch.optim.lr_scheduler]] = None,
-                 writer: SummaryWriter | "auto" | None = None,
+                 writer: SummaryWriter | str | None = None,
                  model_name: str | None = None,
                  **kwargs,
                  ):
@@ -304,7 +304,7 @@ class Trainer():
           extra: String to append to model name to generate filename for saving.
         """
         model_save_path = MODEL_SAVE_DIR / (self.model_name + "_" + extra + ".pt")
-        torch.save(model.state_dict(), model_save_path)
+        torch.save(self.model.state_dict(), model_save_path)
         print(f"Saved a checkpoint at {model_save_path}.")
         
         
