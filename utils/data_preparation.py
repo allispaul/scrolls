@@ -234,8 +234,6 @@ def get_rect_dset(
     # clean input
     fragment_path = Path(fragment_path)
     
-        
-    # read images
     images = [
         np.array(Image.open(filename), dtype=np.float32)/65535.0
         for filename
@@ -307,3 +305,79 @@ def show_labels_with_rects(
         ax.add_patch(patch)
         ax.axis('off')
 
+def get_rect_dset_small(
+    fragment_path: Path | str,
+    z_start: int,
+    z_dim: int,
+    buffer: int,
+    rect: Tuple[int],
+    shuffle: bool = False,
+) -> data.Dataset:
+    """Get a dataset consisting of a rectangle from a single fragment. Unlike
+    get_rect_dset(), this discards the image_stack outside of the rectangle,
+    saving on memory.
+    
+    Args:
+      fragment_path: Path to folder containing fragment data (e.g., 'data/train/1')
+      z_start: Lowest z-value to use from the fragment. Should be between 0
+        and 64. 
+      z_dim: Number of z-values to use.
+      buffer: Radius of subvolumes in x and y directions. Thus, each item in
+        the dataset will be a subvolume of size 2*buffer+1 x 2*buffer+1 x z_dim.
+      rect: Rectangle to use from the fragment. Should be a tuple of the form:
+          (top_left_corner_x, top_left_corner_y, width, height)
+        Use show_labels_with_rects() to double-check the rectangle.
+      shuffle: Whether to shuffle the dataset before returning it.
+    
+    Returns:
+      A dataset consisting of subvolumes from the given fragment inside the
+      given rectangle.
+    """
+    # clean input
+    fragment_path = Path(fragment_path)
+    
+    images = [
+        np.array(Image.open(filename), dtype=np.float32)/65535.0
+        for filename
+        in tqdm(
+            sorted((fragment_path / "surface_volume").glob("*.tif"))[z_start : z_start + z_dim],
+            desc=f"Loading fragment from {fragment_path}"
+        )
+    ]
+    image_stack_numpy = np.stack(images, axis=0)
+    
+    # Get mask and labels
+    mask = np.array(Image.open(fragment_path / "mask.png").convert('1'))
+    if os.path.exists(fragment_path / "inklabels.png"):
+        label = np.array(Image.open(fragment_path / "inklabels.png")).astype('float32')
+    else:
+        label = None
+    
+    # Slice everything along rect
+    # By making copies explicitly, we can discard the larger images
+    x_min = max(0, rect[0] - buffer)
+    x_max = rect[0] + rect[2] + buffer + 1
+    y_min = min(0, rect[1] - buffer)
+    y_max = rect[1] + rect[3] + buffer + 1
+    sliced_image_stack = torch.from_numpy(image_stack_numpy[:, y_min:y_max, x_min:x_max].copy())
+    sliced_mask = mask[y_min:y_max, x_min:x_max].copy()
+    if label is not None:
+        sliced_label = torch.from_numpy(label[y_min:y_max, x_min:x_max].copy())
+        
+    # Retain pixels that are both unmasked and not within buffer of the border
+    not_border = np.zeros(sliced_mask.shape, dtype=bool)
+    not_border[buffer:sliced_mask.shape[0]-buffer, buffer:sliced_mask.shape[1]-buffer] = True
+    arr_mask = sliced_mask * not_border
+    pixels = torch.tensor(np.argwhere(arr_mask))
+        
+    if shuffle:
+        perm = torch.randperm(len(pixels))
+        pixels = pixels[perm]
+        
+    # clean up
+    del images, image_stack_numpy, mask, label
+    gc.collect()
+
+    # define dataset
+    return SubvolumeDataset(sliced_image_stack, sliced_label, pixels, buffer)
+        
