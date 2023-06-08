@@ -138,11 +138,6 @@ class Trainer():
         trainer, and optionally written to TensorBoard. Optionally, periodically
         save a copy of the model.
         
-        A few things in this loop we may want to change eventually:
-          (1) We reinitialize the val_loader iterator every time we perform
-            validation. This makes sense if we're shuffling val_loader, but
-            for performance reasons we may decide to stop doing this.
-        
         Args:
           epochs: Number of training batches to use.
           val_epochs: Number of validation batches to use each time validation
@@ -166,6 +161,11 @@ class Trainer():
         # estimate total epochs
         total_epochs = epochs + ((epochs // val_period) * val_epochs)
         pbar = tqdm(total=total_epochs, desc="Training")
+        
+        # Initialize iterator for validation set -- used to continue validation
+        # loop from where it left off
+        val_iterator = iter(cycle(self.val_loader))
+        
         self.model.train()
         for i, (subvolumes, inklabels) in enumerate(cycle(self.train_loader)):
             pbar.update()
@@ -190,7 +190,7 @@ class Trainer():
 
                 # predict on validation data and record metrics
                 self.model.eval()
-                for j, (val_subvolumes, val_inklabels) in enumerate(self.val_loader):
+                for j, (val_subvolumes, val_inklabels) in enumerate(val_iterator):
                     pbar.update()
                     if j >= val_epochs:
                         break
