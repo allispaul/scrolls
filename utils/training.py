@@ -25,6 +25,7 @@ from .logging import MetricsRecorder, create_writer
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+MODEL_SAVE_DIR = Path("trained_models")
 
 class Trainer():
     """Bundles together a model, a training and optionally a validation dataset,
@@ -125,7 +126,8 @@ class Trainer():
             val_loss = self.criterion(val_outputs, inklabels.to(DEVICE))
         return val_outputs, val_loss
     
-    def train_eval_loop(self, epochs, val_epochs, val_period=500):
+    def train_eval_loop(self, epochs, val_epochs, val_period: int = 500,
+                        save_period: int | None = None):
         """Train model for a given number of epochs, performing validation
         periodically.
         
@@ -133,11 +135,11 @@ class Trainer():
         val_period training batches, pause training and perform validation on
         val_epochs batches from the validation set. Each time validation is
         performed, the model's loss, accuracy, and F0.5 scores are saved to the
-        trainer, and optionally written to TensorBoard.
+        trainer, and optionally written to TensorBoard. Optionally, periodically
+        save a copy of the model.
         
         A few things in this loop we may want to change eventually:
-          (1) We assume that epochs is less than the length of train_loader.
-          (2) We reinitialize the val_loader iterator every time we perform
+          (1) We reinitialize the val_loader iterator every time we perform
             validation. This makes sense if we're shuffling val_loader, but
             for performance reasons we may decide to stop doing this.
         
@@ -147,6 +149,8 @@ class Trainer():
             is performed.
           val_period: Number of epochs to train for in between each occurrence
             of validation (default 500).
+          save_period: Number of epochs to train for before saving another copy
+            of the model (default None, meaning that the model is not saved).
         """
         # Note, this scheduler should not be used if one plans to call
         # train_eval_loop multiple times.
@@ -233,6 +237,10 @@ class Trainer():
                 if np.isnan(self.histories['val_loss'][-1]) or np.isnan(self.histories['train_loss'][-1]):
                     print (f"Model died at training epoch {i+1}, stopping training.")
                     break
+                    
+            # Optionally save a copy of the model
+            if save_period is not None and (i + 1) % save_period == 0:
+                self.save_checkpoint(f"{i+1}_epochs")
     
     def time_train_step(self, n=500):
         """Time training on a given number of training batches. Note that this
@@ -288,5 +296,15 @@ class Trainer():
         plt.tight_layout()
         
     def save_checkpoint(self, extra):
+        """Save a copy of the model.
+        
+        The copy will be saved to trained_models/{model_name}_{extra}.pt.
+        
+        Args:
+          extra: String to append to model name to generate filename for saving.
+        """
+        model_save_path = MODEL_SAVE_DIR / (self.model_name + "_" + extra + ".pt")
+        torch.save(model.state_dict(), model_save_path)
+        print(f"Saved a checkpoint at {model_save_path}.")
         
         
