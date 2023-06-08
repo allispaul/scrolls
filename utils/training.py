@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tqdm.auto import tqdm
 
-from .logging import MetricsRecorder
+from .logging import MetricsRecorder, create_writer
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -41,7 +41,8 @@ class Trainer():
                  criterion: nn.Module = nn.BCEWithLogitsLoss(),
                  lr: float = 0.03,
                  scheduler: Optional[type[torch.optim.lr_scheduler]] = None,
-                 writer: Optional[SummaryWriter] = None,
+                 writer: SummaryWriter | "auto" | None = None,
+                 model_name: str | None = None,
                  **kwargs,
                  ):
         """Create a Trainer.
@@ -58,27 +59,21 @@ class Trainer():
             a class, which will be initialized at the start of training. If no
             scheduler is given, a constant learning rate is used.
           writer: SummaryWriter object to log performance to TensorBoard. You
-            can create this using .logging.create_writer().
+            can create this using .logging.create_writer(). If writer is
+            "auto", a SummaryWriter will automatically be created, using
+            model_name (which is required in this case).
+          model_name: Name of the model. Will be used to save checkpoints for
+            the model and to automatically create a SummaryWriter.
           Keyword arguments prefixed by `optimizer_` or `scheduler_` are passed
             to the optimizer or scheduler, respectively.
         """
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
+        
         self.criterion = criterion
         self.lr = lr
         self.scheduler_class = scheduler
-        self.histories = {
-            'epochs': [],
-            'train_loss': [],
-            'train_acc': [],
-            'train_fbeta': [],
-            'val_loss': [],
-            'val_acc': [],
-            'val_fbeta': [],
-            'lr': []
-        }
-        self.writer = writer
         self.optimizer_kwargs = dict()
         self.scheduler_kwargs = dict()
         self.scheduler_kwargs.setdefault('max_lr', self.lr)
@@ -95,6 +90,24 @@ class Trainer():
                 self.optimizer,
                 **self.scheduler_kwargs
             )
+            
+        self.histories = {
+            'epochs': [],
+            'train_loss': [],
+            'train_acc': [],
+            'train_fbeta': [],
+            'val_loss': [],
+            'val_acc': [],
+            'val_fbeta': [],
+            'lr': []
+        }
+        
+        self.model_name = model_name
+        self.writer = writer
+        if self.writer == "auto":
+            if model_name is None:
+                raise ValueError('model_name is required with writer="auto"')
+            self.writer = create_writer(model_name)
     
     def train_step(self, subvolumes, inklabels):
         self.optimizer.zero_grad()
@@ -273,3 +286,7 @@ class Trainer():
         plt.legend()
         
         plt.tight_layout()
+        
+    def save_checkpoint(self, extra):
+        
+        
