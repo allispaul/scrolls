@@ -210,11 +210,9 @@ def get_rect_dset(
     z_dim: int,
     buffer: int,
     rect: Tuple[int] | None = None,
+    shuffle: bool = False,
 ) -> data.Dataset:
     """Get a dataset consisting of a rectangle from a single fragment.
-    
-    This returns one unshuffled dataset, which should only be used for
-    validation, visualization, or testing.
     
     Args:
       fragment_path: Path to folder containing fragment data (e.g., 'data/train/1')
@@ -227,6 +225,7 @@ def get_rect_dset(
           (top_left_corner_x, top_left_corner_y, width, height)
         Use show_labels_with_rects() to double-check the rectangle. If rect is
         None, the whole dataset will be used.
+      shuffle: Whether to shuffle the dataset before returning it.
     
     Returns:
       A dataset consisting of subvolumes from the given fragment inside the
@@ -271,6 +270,10 @@ def get_rect_dset(
         pixels = torch.tensor(np.argwhere(inside_rect))
     else:
         pixels = torch.tensor(np.argwhere(arr_mask))
+        
+    if shuffle:
+        perm = torch.randperm(len(pixels))
+        pixels = pixels[perm]
 
     # define dataset
     return SubvolumeDataset(image_stack, label, pixels, buffer)
@@ -303,5 +306,4 @@ def show_labels_with_rects(
         ax = plt.gca()
         ax.add_patch(patch)
         ax.axis('off')
-
 
