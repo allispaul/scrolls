@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional, List, Tuple, Callable
 from itertools import cycle
 import gc
+import time
 
 from PIL import Image
 # disable PIL.DecompressionBombWarning
@@ -89,6 +90,27 @@ class Trainer():
                 self.scheduler_kwargs.update({key[10:]: kwargs[key]})
         self.optimizer = optimizer(model.parameters(), lr=self.lr,
                                    **self.optimizer_kwargs)
+        if self.scheduler_class is not None:
+            self.scheduler = self.scheduler_class(
+                self.optimizer,
+                **self.scheduler_kwargs
+            )
+    
+    def train_step(self, subvolumes, inklabels):
+        self.optimizer.zero_grad()
+        outputs = self.model(subvolumes.to(DEVICE))
+        loss = self.criterion(outputs, inklabels.to(DEVICE))
+        loss.backward()
+        self.optimizer.step()
+        if self.scheduler_class is not None:
+            self.scheduler.step()
+        return outputs, loss
+            
+    def val_step(self, subvolumes, inklabels):
+        with torch.inference_mode():
+            val_outputs = self.model(subvolumes.to(DEVICE))
+            val_loss = self.criterion(val_outputs, inklabels.to(DEVICE))
+        return val_outputs, val_loss
     
     def train_eval_loop(self, epochs, val_epochs, val_period=500):
         """Train model for a given number of epochs, performing validation
@@ -116,11 +138,6 @@ class Trainer():
         # Note, this scheduler should not be used if one plans to call
         # train_eval_loop multiple times.
             
-        if self.scheduler_class is not None:
-            self.scheduler = self.scheduler_class(
-                self.optimizer,
-                **self.scheduler_kwargs
-            )
         self.model.train()
         
         train_metrics = MetricsRecorder()
@@ -132,17 +149,12 @@ class Trainer():
         # estimate total epochs
         total_epochs = epochs + ((epochs // val_period) * val_epochs)
         pbar = tqdm(total=total_epochs, desc="Training")
+        self.model.train()
         for i, (subvolumes, inklabels) in enumerate(cycle(self.train_loader)):
             pbar.update()
             if i >= epochs:
                 break
-            self.optimizer.zero_grad()
-            outputs = self.model(subvolumes.to(DEVICE))
-            loss = self.criterion(outputs, inklabels.to(DEVICE))
-            loss.backward()
-            self.optimizer.step()
-            if self.scheduler_class is not None:
-                self.scheduler.step()
+            outputs, loss = self.train_step(subvolumes, inklabels)
             # Updates the training_loss, training_fbeta and training_accuracy
             train_metrics.update(outputs, inklabels, loss)
             if (i + 1) % val_period == 0 or i+1 == len(self.train_loader):
@@ -165,10 +177,10 @@ class Trainer():
                     pbar.update()
                     if j >= val_epochs:
                         break
-                    with torch.inference_mode():
-                        val_outputs = self.model(val_subvolumes.to(DEVICE))
-                        val_loss = self.criterion(val_outputs, val_inklabels.to(DEVICE))
+                    val_outputs, val_loss = self.val_step(val_subvolumes, val_inklabels)
                     val_metrics.update(val_outputs, val_inklabels, val_loss)
+                self.model.train()
+                
                 self.histories['val_loss'].append(val_metrics.loss / j)
                 self.histories['val_acc'].append(val_metrics.accuracy / j)
                 self.histories['val_fbeta'].append(val_metrics.fbeta / j)
@@ -208,6 +220,32 @@ class Trainer():
                 if np.isnan(self.histories['val_loss'][-1]) or np.isnan(self.histories['train_loss'][-1]):
                     print (f"Model died at training epoch {i+1}, stopping training.")
                     break
+    
+    def time_train_step(self, n=500):
+        """Time training on a given number of training batches. Note that this
+        does train the model.
+        """
+        tic = time.perf_counter()
+        self.model.train()
+        for i in range(n):
+            subvolumes, inklabels = next(iter(self.train_loader))
+            self.train_step(subvolumes, inklabels)
+        toc = time.perf_counter()
+        delta = toc - tic
+        print(f"Trained on {n} batches in {delta:.2f}s.")
+        return n
+        
+    def time_val_step(self, n=500):
+        """Time prediction on a given number of validation batches."""
+        tic = time.perf_counter()
+        self.model.eval()
+        for i in range(n):
+            subvolumes, inklabels = next(iter(self.val_loader))
+            self.val_step(subvolumes, inklabels)
+        toc = time.perf_counter()
+        delta = toc - tic
+        print(f"Predicted on {n} validation batches in {delta:.2f}s.")
+        return n
 
     def plot_metrics(self):
         plt.subplot(131)
