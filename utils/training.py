@@ -251,6 +251,28 @@ class Trainer():
             # Optionally save a copy of the model
             if save_period is not None and (i + 1) % save_period == 0:
                 self.save_checkpoint(f"{i+1}_epochs")
+                
+    def train_loop_simple(self, epochs):
+        """Train model for a given number of epochs.
+        
+        I made this to diagnose the memory issues. It's an extremely simple
+        version of the training loop, without any extra functionality.
+        
+        Args:
+          epochs: Number of training batches to use.
+        """
+        
+        self.model.train()
+        for i, (subvolumes, inklabels) in enumerate(cycle(self.train_loader)):
+            if i >= epochs:
+                break
+            self.optimizer.zero_grad()
+            outputs = self.model(subvolumes.to(DEVICE))
+            loss = self.criterion(outputs, inklabels.to(DEVICE))
+            loss.backward()
+            self.optimizer.step()
+            if self.scheduler_class is not None:
+                self.scheduler.step()
     
     def time_train_step(self, n=500):
         """Time training on a given number of training batches. Note that this
