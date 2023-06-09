@@ -177,10 +177,10 @@ class Trainer():
         
         # Initialize iterator for validation set -- used to continue validation
         # loop from where it left off
-        val_iterator = iter(cycle(self.val_loader))
+        val_iterator = iter(self.val_loader)
         
         self.model.train()
-        for i, (subvolumes, inklabels) in enumerate(cycle(self.train_loader)):
+        for i, (subvolumes, inklabels) in enumerate(self.train_loader):
             pbar.update()
             if i >= epochs:
                 break
