@@ -76,8 +76,8 @@ def predict_validation_rects(model: nn.Module,
 
     for i, (fragment, rect) in enumerate(zip(fragments_to_use, validation_rects)):
         # define validation dataset
-        val_dset = get_rect_dset(fragment, data_path, z_start[i], z_dim,
-                                 buffer, rect)
+        val_dset = get_rect_dset_small(fragment, data_path, z_start[i], z_dim,
+                                       buffer, rect)
         
         val_loader = data.DataLoader(val_dset, batch_size=BATCH_SIZE, shuffle=False)
         
