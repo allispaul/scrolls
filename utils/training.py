@@ -1,6 +1,5 @@
 from pathlib import Path
 from typing import Optional, List, Tuple, Callable
-from itertools import cycle
 import gc
 import time
 
@@ -26,6 +25,16 @@ from .logging import MetricsRecorder, create_writer
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 MODEL_SAVE_DIR = Path("trained_models")
+
+
+def cycle(iterable):
+    # from https://github.com/pytorch/pytorch/issues/23900#issuecomment-518858050
+    iterator = iter(iterable)
+    while True:
+        try:
+            yield next(iterator)
+        except StopIteration:
+            iterator = iter(iterable)
 
 class Trainer():
     """Bundles together a model, a training and optionally a validation dataset,
@@ -177,10 +186,10 @@ class Trainer():
         
         # Initialize iterator for validation set -- used to continue validation
         # loop from where it left off
-        val_iterator = iter(self.val_loader)
+        val_iterator = iter(cycle(self.val_loader))
         
         self.model.train()
-        for i, (subvolumes, inklabels) in enumerate(self.train_loader):
+        for i, (subvolumes, inklabels) in enumerate(cycle(self.train_loader)):
             pbar.update()
             if i >= epochs:
                 break
