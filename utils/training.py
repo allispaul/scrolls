@@ -164,8 +164,6 @@ class Trainer():
         """
         # Note, this scheduler should not be used if one plans to call
         # train_eval_loop multiple times.
-            
-        self.model.train()
         
         train_metrics = MetricsRecorder()
         val_metrics = MetricsRecorder()
