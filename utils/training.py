@@ -109,6 +109,21 @@ class Trainer():
             if model_name is None:
                 raise ValueError('model_name is required with writer="auto"')
             self.writer = create_writer(model_name)
+            
+    def get_last_lr(self) -> float:
+        """Get the last used learning rate.
+        
+        Looks in the scheduler if one is defined, and if not, looks in the
+        optimizer. Assumes that a single learning rate is defined for all
+        parameters.
+        
+        Returns:
+          The last used learning rate of the trainer.
+        """
+        if self.scheduler_class is not None:
+            return self.scheduler.get_last_lr()[0]
+        else:
+            return self.optimizer.param_groups[0]['lr']
     
     def train_step(self, subvolumes, inklabels):
         self.optimizer.zero_grad()
@@ -183,10 +198,7 @@ class Trainer():
                 train_metrics.reset()
 
                 # record learning rate
-                if self.scheduler_class is not None:
-                    self.histories['lr'].append(self.scheduler.get_last_lr()[0])
-                else:
-                    self.histories['lr'].append(self.optimizer.param_groups[0]['lr'])
+                self.histories['lr'].append(self.get_last_lr())
 
                 # predict on validation data and record metrics
                 self.model.eval()
