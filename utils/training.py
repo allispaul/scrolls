@@ -196,7 +196,7 @@ class Trainer():
             outputs, loss = self.train_step(subvolumes, inklabels)
             # Updates the training_loss, training_fbeta and training_accuracy
             train_metrics.update(outputs, inklabels, loss)
-            if (i + 1) % val_period == 0 or i+1 == len(self.train_loader):
+            if (i + 1) % val_period == 0:
                 # record number of epochs and training metrics
                 self.histories['epochs'].append(i+1)
                 self.histories['train_loss'].append(train_metrics.loss / val_period)
