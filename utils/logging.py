@@ -44,7 +44,7 @@ class MetricsRecorder():
         Takes outputs, labels and loss as input and updates the instance variables fbeta, accuracy and loss
         """
         labels = labels.to(DEVICE)
-        pred_labels = outputs.detach().sigmoid().gt(0.4).int()
+        pred_labels = outputs.detach().to(DEVICE).sigmoid().gt(0.4).int()
         accuracy = (pred_labels == labels).sum().float().div(labels.size(0)).cpu()
         self.fbeta += fbeta_score(labels.view(-1).cpu().numpy(),
                                   pred_labels.view(-1).cpu().numpy(), beta=0.5)
