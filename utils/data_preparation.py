@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional, List, Tuple
 import gc
 import os
+import random
 
 from PIL import Image
 # disable PIL.DecompressionBombWarning
@@ -18,11 +19,18 @@ from tqdm.auto import tqdm
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-
 class SubvolumeDataset(data.Dataset):
-    """Dataset containing cubical subvolumes of image stack."""
-    def __init__(self, image_stack: torch.Tensor, label: torch.Tensor | None,
-                 pixels: torch.Tensor, buffer: int):
+    """Dataset containing cubical subvolumes of image stack, with the possibility
+    of data augmentation through random flips and rotations.
+    """
+    def __init__(self,
+                 image_stack: torch.Tensor,
+                 label: torch.Tensor | None,
+                 pixels: torch.Tensor,
+                 buffer: int,
+                 xy_flip_prob: float = 0.0,
+                 z_flip_prob: float = 0.0,
+                 xy_rot_prob: float = 0.0):
         """Create a new SubvolumeDataset.
         
         Args:
@@ -35,14 +43,23 @@ class SubvolumeDataset(data.Dataset):
             a single subvolume center.
           buffer: radius of each subvolume in the x and y direction. Thus, each
             subvolume has shape (z_dim, 2*buffer+1, 2*buffer+1).
+          xy_flip_prob: Probability of reflecting each item in the x and y
+            directions (independently).
+          z_flip_prob: Probability of reflecting each item in the z direction.
+          xy_rot_prob: Probability of rotating item by 90 degrees in the xy
+            plane. If this check is met, there's a 50% chance of a clockwise
+            rotation and a 50% chance of a counterclockwise rotation.
         """
+        super().__init__()
         self.image_stack = image_stack
         self.label = label
         self.pixels = pixels
         self.buffer = buffer
-        
+        self.xy_flip_prob = xy_flip_prob
+        self.z_flip_prob = z_flip_prob
+        self.xy_rot_prob = xy_rot_prob
+    
     def __len__(self):
-        """Get the length of the dataset."""
         return len(self.pixels)
     
     def __getitem__(self, index):
@@ -51,15 +68,40 @@ class SubvolumeDataset(data.Dataset):
         If the dataset was defined without label data, the returned label will
         be -1.
         """
+        # Note! torch.flip returns a copy, not a view -- thus, we expect this
+        # to be slower than the vanilla SubvolumeDataset.
+        # Flipping in numpy and then converting to torch.Tensor doesn't work,
+        # since torch.Tensor can't take a numpy array with a negative stride.
         y, x = self.pixels[index]
         subvolume = self.image_stack[
             :, y-self.buffer:y+self.buffer+1, x-self.buffer:x+self.buffer+1
-        ].view(1, -1, self.buffer*2+1, self.buffer*2+1)
+        ].reshape(1, -1, self.buffer*2+1, self.buffer*2+1) # -> [1, z, y, x]
+        
+        # Perform transforms
+        if random.random() < self.xy_flip_prob:
+            subvolume = torch.flip(subvolume, (2,))
+        if random.random() < self.xy_flip_prob:
+            subvolume = torch.flip(subvolume, (3,))
+        if random.random() < self.z_flip_prob:
+            subvolume = torch.flip(subvolume, (1,))
+        if random.random() < self.xy_rot_prob:
+            if random.random() < 0.5:
+                subvolume = torch.rot90(subvolume, k=1, dims=(2, 3))
+            else:
+                subvolume = torch.rot90(subvolume, k=3, dims=(2, 3))
+        
         if self.label is None:
             inklabel = -1
         else:
             inklabel = self.label[y, x].view(1)
-        return subvolume, inklabel   
+            
+        return subvolume, inklabel
+    
+    def set_probs(self, xy_flip_prob, z_flip_prob, xy_rot_prob):
+        """Set probabilities of data augmentation transforms."""
+        self.xy_flip_prob = xy_flip_prob
+        self.z_flip_prob = z_flip_prob
+        self.xy_rot_prob = xy_rot_prob
     
     
 def get_train_and_val_dsets(
@@ -304,6 +346,7 @@ def show_labels_with_rects(
         ax = plt.gca()
         ax.add_patch(patch)
         ax.axis('off')
+        
 
 def get_rect_dset_small(
     fragment_path: Path | str,
