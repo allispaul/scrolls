@@ -1,9 +1,0 @@
-Check other CNN architectures
-
-Predict on a N X N square instead of each pixel
-
-Can you read greek letter of the ink 
-
-Add Relu/ modify neural network
-
-
