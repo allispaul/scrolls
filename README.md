@@ -1,4 +1,4 @@
-# scrolls
+# Vesuvius ink detection challenge
 This repository contains some of the work we did on the [Vesuvius ink detection challenge](https://www.kaggle.com/competitions/vesuvius-challenge-ink-detection). 
 
 
